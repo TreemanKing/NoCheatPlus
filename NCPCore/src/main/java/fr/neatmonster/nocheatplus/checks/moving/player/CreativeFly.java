@@ -21,6 +21,7 @@ import java.util.Locale;
 import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.World;
+import org.bukkit.block.Block;
 import org.bukkit.entity.Player;
 import org.bukkit.util.Vector;
 
@@ -62,7 +63,7 @@ public class CreativeFly extends Check {
 
     private final List<String> tags = new LinkedList<String>();
     private final BlockChangeTracker blockChangeTracker;
-    private IGenericInstanceHandle<IAttributeAccess> attributeAccess = NCPAPIProvider.getNoCheatPlusAPI().getGenericInstanceHandle(IAttributeAccess.class);
+    private final IGenericInstanceHandle<IAttributeAccess> attributeAccess = NCPAPIProvider.getNoCheatPlusAPI().getGenericInstanceHandle(IAttributeAccess.class);
 
 
    /**
@@ -122,19 +123,14 @@ public class CreativeFly extends Check {
             }
         }
 
-        // Do not check for nofall if the player has slowfalling active or is gliding
+        // Do not check for no-fall if the player has slow-falling active or is gliding
         if (Bridge1_13.hasSlowfalling() && model.getScaleSlowfallingEffect() 
             || Bridge1_9.isGlidingWithElytra(player) && thisMove.yDistance > -0.5) {
             data.clearNoFallData();
         } 
         
-        // HACK: when switching model, we need to add some velocity to harmonize the transition and not trggering fps.
+        // HACK: when switching model, we need to add some velocity to harmonize the transition and not triggering fps.
         workaroundSwitchingModel(player, thisMove, lastMove, model, data, cc, debug);
-
-
-
-
-
 
         //////////////////////////
         // Horizontal move.
@@ -170,11 +166,6 @@ public class CreativeFly extends Check {
             tags.add("hdist");
         }
 
-
-
-
-
-
         //////////////////////////
         // Vertical move.
         //////////////////////////
@@ -208,7 +199,7 @@ public class CreativeFly extends Check {
             tags.add("vvel");
         }
         
-        // The antilevitation subcheck
+        // The anti-levitation sub-check
         if (lastMove.toIsValid && !player.isFlying() && model.getScaleLevitationEffect()
             && thisMove.modelFlying == lastMove.modelFlying) { // InLiquid check is alread included in MovingConfig.getModelFlying()
 
@@ -251,8 +242,6 @@ public class CreativeFly extends Check {
 
         final double result = Math.max(0.0, resultH) + Math.max(0.0, resultV);
 
-
-
         //////////////////////////
         // Output debug
         //////////////////////////
@@ -260,13 +249,14 @@ public class CreativeFly extends Check {
             outpuDebugMove(player, hDistance, limitH, yDistance, limitV, model, tags, data);
         }
 
-
-
         ///////////////////////
         // Violation handling
         ///////////////////////
 
         Location setBack = null; // Might get altered below.
+
+        boolean isElytra = Bridge1_9.isGlidingWithElytra(player);
+        boolean inNarrowSpace = isElytra && isInNarrowSpace(player);
 
         if (result > 0.0) {
             data.creativeFlyVL += result;
@@ -285,9 +275,12 @@ public class CreativeFly extends Check {
                 }
             }
             if (executeActions(vd).willCancel()) {
-                // Compose a new location based on coordinates of "newTo" and viewing direction of "event.getTo()"
-                // to allow the player to look somewhere else despite getting pulled back by NoCheatPlus.
-                setBack = data.getSetBack(to); // (OK)
+                // Only set back if not gliding with elytra in a narrow space.
+                if (!(isElytra && inNarrowSpace)) {
+                    setBack = data.getSetBack(to); // (OK)
+                } else if (debug) {
+                    debug(player, "Set back skipped for Elytra in narrow space.");
+                }
             }
         }
         else {
@@ -334,7 +327,6 @@ public class CreativeFly extends Check {
         }
     }
 
-
     /**
      * Horizontal distance checking.
      * @param player
@@ -353,7 +345,6 @@ public class CreativeFly extends Check {
     private double[] hDist(final Player player, final PlayerLocation from, final PlayerLocation to, final double hDistance, 
                            final double yDistance, final boolean sprinting, final boolean flying, final PlayerMoveData thisMove, 
                            final PlayerMoveData lastMove, final long time, final ModelFlying model, final MovingData data, final MovingConfig cc) {
-
         // Modifiers.
         double fSpeed;
         final boolean ripglide = Bridge1_13.isRiptiding(player) && Bridge1_9.isGlidingWithElytra(player);
@@ -479,7 +470,6 @@ public class CreativeFly extends Check {
         return new double[] {limitH, resultH};
     }
 
-
    /**
      * Ascending (yDistance > 0.0) check.
      * @param from
@@ -603,7 +593,6 @@ public class CreativeFly extends Check {
         // Post-violation recovery.
         return new double[] {limitV, resultV};
     }
-
 
     /**
      * Elytra gliding model
@@ -1246,6 +1235,33 @@ public class CreativeFly extends Check {
     */
     private boolean isCollideWithHB(PlayerLocation from) {
         return (from.getBlockFlags() & BlockFlags.F_STICKY) != 0;
+    }
+
+
+  /**
+    * Checks if the player is in a narrow space (surrounded by solid blocks).
+    * This is a simple bounding box check for blocks around the player's location.
+    */
+    private boolean isInNarrowSpace(Player player) {
+        Location loc = player.getLocation();
+        World world = loc.getWorld();
+        double minX = loc.getX() - 0.3;
+        double maxX = loc.getX() + 0.3;
+        double minY = loc.getY();
+        double maxY = loc.getY() + 1.8; // Player height
+        double minZ = loc.getZ() - 0.3;
+        double maxZ = loc.getZ() + 0.3;
+        for (double x = minX; x <= maxX; x += 0.6) {
+            for (double y = minY; y <= maxY; y += 0.9) {
+                for (double z = minZ; z <= maxZ; z += 0.6) {
+                    Block block = world.getBlockAt((int)Math.floor(x), (int)Math.floor(y), (int)Math.floor(z));
+                    if (block.getType().isSolid()) {
+                        return true;
+                    }
+                }
+            }
+        }
+        return false;
     }
 
 
