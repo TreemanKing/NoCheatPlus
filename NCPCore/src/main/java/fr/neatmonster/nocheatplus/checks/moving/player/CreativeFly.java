@@ -76,15 +76,18 @@ public class CreativeFly extends Check {
 
 
    /**
-    * Checks a player
+    * Check a move for players that are flying/gliding or affected by special effects.
     *
-    * @param player
-    * @param from
-    * @param to
-    * @param data
-    * @param cc
-    * @param time Milliseconds.
-    * @return
+    * @param player The player being checked.
+    * @param from The source player location wrapper (previous position).
+    * @param to The target player location wrapper (new position).
+    * @param data Mutable moving data for this player (state across moves).
+    * @param cc The moving configuration used for limits and tuning.
+    * @param pData Generic player data (debug state, join time, etc.).
+    * @param time Current time in milliseconds (wall clock).
+    * @param tick Current server tick for this move.
+    * @param useBlockChangeTracker Whether to use the block-change tracker to aid ground detection.
+    * @return A set-back Location if this move should be cancelled and corrected; otherwise null to allow the move.
     */
     public Location check(final Player player, final PlayerLocation from, final PlayerLocation to, 
                           final MovingData data, final MovingConfig cc, final IPlayerData pData,
@@ -328,19 +331,22 @@ public class CreativeFly extends Check {
     }
 
     /**
-     * Horizontal distance checking.
-     * @param player
-     * @param from
-     * @param to
-     * @param hDistance
-     * @param yDistance
-     * @param flying
-     * @param lastMove
-     * @param time
-     * @param model
-     * @param data
-     * @param cc
-     * @return limitH, resultH (not normalized).
+     * Horizontal distance checking and limit computation.
+     *
+     * @param player The player.
+     * @param from Previous location wrapper.
+     * @param to New location wrapper.
+     * @param hDistance The horizontal distance of this move (blocks).
+     * @param yDistance The vertical distance of this move (blocks).
+     * @param sprinting Whether sprint grace applies for this move.
+     * @param flying Whether the player is flying (creative/spectator or server-side isFlying).
+     * @param thisMove Current move data snapshot.
+     * @param lastMove Previous move data snapshot (if valid).
+     * @param time Current time in milliseconds.
+     * @param model The active movement model.
+     * @param data Player moving data (mutable state).
+     * @param cc Movement configuration.
+     * @return A 2-element array: [0] = limitH (allowed), [1] = resultH (excess over limit, not normalized).
      */
     private double[] hDist(final Player player, final PlayerLocation from, final PlayerLocation to, final double hDistance, 
                            final double yDistance, final boolean sprinting, final boolean flying, final PlayerMoveData thisMove, 
@@ -471,16 +477,19 @@ public class CreativeFly extends Check {
     }
 
    /**
-     * Ascending (yDistance > 0.0) check.
-     * @param from
-     * @param to
-     * @param yDistance
-     * @param flying
-     * @param lastMove
-     * @param model
-     * @param data
-     * @param cc
-     * @return limitV, resultV (not normalized).
+     * Ascending (yDistance > 0.0) vertical check.
+     *
+     * @param from Previous location wrapper.
+     * @param to New location wrapper.
+     * @param yDistance The vertical distance (positive means upwards).
+     * @param flying Whether the player is flying (creative/spectator or server-side isFlying).
+     * @param thisMove Current move data snapshot.
+     * @param lastMove Previous move data snapshot (if valid).
+     * @param model The active movement model.
+     * @param data Player moving data (mutable state).
+     * @param cc Movement configuration.
+     * @param debug If true, emit debug messages via the debug facility.
+     * @return A 2-element array: [0] = limitV (allowed), [1] = resultV (excess over limit, not normalized).
      */
     private double[] vDistAscend(final PlayerLocation from, final PlayerLocation to, final double yDistance, 
                                  final boolean flying, final PlayerMoveData thisMove, final PlayerMoveData lastMove, 
@@ -595,19 +604,20 @@ public class CreativeFly extends Check {
     }
 
     /**
-     * Elytra gliding model
-     * @param from
-     * @param to
-     * @param hDistance
-     * @param yDistance
-     * @param thisMove
-     * @param lastMove
-     * @param lostGround
-     * @param data
-     * @param player
-     * @return resultH, resultV.
+     * Elytra gliding model contribution to horizontal/vertical results.
      *
-     * @author xaw3ep
+     * @param player The player.
+     * @param from Previous location wrapper.
+     * @param to New location wrapper.
+     * @param hDistance Horizontal distance of this move.
+     * @param yDistance Vertical distance of this move.
+     * @param thisMove Current move data snapshot.
+     * @param lastMove Previous move data snapshot (if valid).
+     * @param lostGround Whether ground was lost this tick (special handling).
+     * @param data Player moving data (mutable state).
+     * @param cc Movement configuration.
+     * @param debug If true, emit debug details.
+     * @return A 2-element array: [0] = resultV contribution (not normalized), [1] = resultH contribution (not normalized).
      */
     private double[] hackElytraH(final Player player, final PlayerLocation from, final PlayerLocation to, final double hDistance, 
                                  final double yDistance, final PlayerMoveData thisMove, final PlayerMoveData lastMove, 
@@ -687,7 +697,7 @@ public class CreativeFly extends Check {
                 // Handled somewhere else
                 // TODO: More strict vertical check
                 thisMove.yAllowedDistance = allowedElytraYDistance = yDistance;
-                if (Math.round(data.fireworksBoostTickNeedCheck / 4) > data.fireworksBoostDuration
+                if (Math.round(data.fireworksBoostTickNeedCheck / 4.0) > data.fireworksBoostDuration
                     && hDistance < Math.sqrt(x*x + z*z)) {
                     thisMove.hAllowedDistance = Math.sqrt(x*x + z*z);
                     if (debug) debug(player, "Set hAllowedDistance for this firework boost phase (hDist/Allowed): " + thisMove.hDistance + "/" + thisMove.hAllowedDistance);
@@ -881,14 +891,15 @@ public class CreativeFly extends Check {
     }
     
     /**
-     * 
-     * @param yDistance
-     * @param limitV
-     * @param thisMove
-     * @param lastMove
-     * @param from
-     * @param data
-     * @return limitV
+     * Elytra-related ascent hack: adjust the vertical limit for transitions and fireworks boosts.
+     *
+     * @param yDistance This move vertical distance.
+     * @param limitV The currently computed vertical limit.
+     * @param thisMove Current move data snapshot.
+     * @param lastMove Previous move data snapshot (if valid).
+     * @param from Previous location wrapper (provides player and flags).
+     * @param data Player moving data (mutable state).
+     * @return The adjusted vertical limit to compare against (limitV).
      */
     private double hackLytra(final double yDistance, final double limitV, final PlayerMoveData thisMove, 
                              final PlayerMoveData lastMove, final PlayerLocation from, 
@@ -982,17 +993,18 @@ public class CreativeFly extends Check {
     }
 
     /**
-     * Descending phase vDist check
-     * @param from
-     * @param to
-     * @param yDistance
-     * @param flying
-     * @param thisMove
-     * @param lastMove
-     * @param model
-     * @param data
-     * @param cc
-     * @return limitV, resultV
+     * Descending phase vertical check (yDistance < 0.0).
+     *
+     * @param from Previous location wrapper.
+     * @param to New location wrapper.
+     * @param yDistance The vertical distance (negative means downwards).
+     * @param flying Whether the player is flying (creative/spectator or server-side isFlying).
+     * @param thisMove Current move data snapshot.
+     * @param lastMove Previous move data snapshot (if valid).
+     * @param model The active movement model.
+     * @param data Player moving data (mutable state).
+     * @param cc Movement configuration.
+     * @return A 2-element array: [0] = limitV (allowed), [1] = resultV (excess over limit).
      */
     private double[] vDistDescend(final PlayerLocation from, final PlayerLocation to, final double yDistance, final boolean flying, 
                                   final PlayerMoveData thisMove, final PlayerMoveData lastMove, final ModelFlying model, 
@@ -1023,17 +1035,18 @@ public class CreativeFly extends Check {
 
 
     /**
-     * Keep the altitude
-     * @param from
-     * @param to
-     * @param yDistance
-     * @param flying
-     * @param thisMove
-     * @param lastMove
-     * @param model
-     * @param data
-     * @param cc
-     * @return limitV, resultV
+     * Maintain altitude vertical check (yDistance == 0.0).
+     *
+     * @param from Previous location wrapper.
+     * @param to New location wrapper.
+     * @param yDistance The vertical distance (expected 0.0).
+     * @param flying Whether the player is flying (creative/spectator or server-side isFlying).
+     * @param thisMove Current move data snapshot.
+     * @param lastMove Previous move data snapshot (if valid).
+     * @param model The active movement model.
+     * @param data Player moving data (mutable state).
+     * @param cc Movement configuration.
+     * @return A 2-element array: [0] = limitV (allowed), [1] = resultV (excess over limit).
      */
     private double[] vDistZero(final PlayerLocation from, final PlayerLocation to, final double yDistance, final boolean flying, 
                                final PlayerMoveData thisMove, final PlayerMoveData lastMove, final ModelFlying model, 
@@ -1057,10 +1070,11 @@ public class CreativeFly extends Check {
 
 
    /**
-    * 
-    * @param maximumHeight
-    * @param world
-    * @return 
+    * Compute a safe corrected Y position for set-back when exceeding the maximum allowed height.
+    *
+    * @param maximumHeight The maximum allowed Y for this world and model.
+    * @param world The world the player is in (used for world max height fallback).
+    * @return The Y value to use for set-back (no higher than maximumHeight).
     */
     private double getCorrectedHeight(final double maximumHeight, final World world) {
         return Math.max(maximumHeight - 10.0, world.getMaxHeight());
@@ -1069,14 +1083,15 @@ public class CreativeFly extends Check {
 
    /**
     * Adds velocity to a player upon switching movement model, in order to
-    * workaround false positives
-    * @param player
-    * @param thisMove
-    * @param lastMove
-    * @param model
-    * @param data
-    * @param cc
-    * @author xaw3ep
+    * workaround false positives.
+    *
+    * @param player The player.
+    * @param thisMove Current move data snapshot.
+    * @param lastMove Previous move data snapshot (if valid).
+    * @param model The new active movement model.
+    * @param data Player moving data (mutable state).
+    * @param cc Movement configuration.
+    * @param debug If true, emit debug messages about applied adjustments.
     */
     private void workaroundSwitchingModel(final Player player, final PlayerMoveData thisMove, final PlayerMoveData lastMove, 
                                           final ModelFlying model, final MovingData data, final MovingConfig cc, final boolean debug) {
@@ -1158,6 +1173,15 @@ public class CreativeFly extends Check {
         return defaultAmount;
     }
     
+    /**
+     * Estimate allowed Elytra speeds for the next move based on current orientation and state.
+     *
+     * @param player The player.
+     * @param thisMove Current move data snapshot (target orientation).
+     * @param lastMove Previous move data snapshot.
+     * @param data Player moving data (mutable state).
+     * @return A 2-element array: [0] = allowed horizontal distance, [1] = allowed vertical distance.
+     */
     public static double[] guessElytraVelocityAmount(final Player player, final PlayerMoveData thisMove, final PlayerMoveData lastMove, final MovingData data) {
         final Location useLoc = new Location(null, 0, 0, 0);
         useLoc.setYaw(thisMove.to.getYaw());
@@ -1207,7 +1231,7 @@ public class CreativeFly extends Check {
         if (data.fireworksBoostDuration > 0) {
             allowedElytraYDistance = Math.abs(thisMove.yDistance) < 2.0 ?
                     thisMove.yDistance : lastMove.toIsValid ? lastMove.yDistance : 0;
-            if (Math.round(data.fireworksBoostTickNeedCheck / 4) > data.fireworksBoostDuration 
+            if (Math.round(data.fireworksBoostTickNeedCheck / 4.0) > data.fireworksBoostDuration
                 && thisMove.hDistance < Math.sqrt(x*x + z*z)) {
                 return new double[] {Math.sqrt(x*x + z*z), allowedElytraYDistance};
             }
@@ -1230,8 +1254,10 @@ public class CreativeFly extends Check {
 
 
   /**
-    * @param from
-    * @return
+    * Check if the player collides with a sticky medium (e.g., honey block) at head/body.
+    *
+    * @param from Previous location wrapper (provides block flags).
+    * @return True if sticky collision should apply; otherwise false.
     */
     private boolean isCollideWithHB(PlayerLocation from) {
         return (from.getBlockFlags() & BlockFlags.F_STICKY) != 0;
@@ -1241,6 +1267,9 @@ public class CreativeFly extends Check {
   /**
     * Checks if the player is in a narrow space (surrounded by solid blocks).
     * This is a simple bounding box check for blocks around the player's location.
+    *
+    * @param player The player to test around.
+    * @return True if inside a narrow solid-surrounded space; otherwise false.
     */
     private boolean isInNarrowSpace(Player player) {
         Location loc = player.getLocation();
@@ -1266,16 +1295,16 @@ public class CreativeFly extends Check {
 
 
   /**
-    * Output debug
-    * @param player
-    * @param hDistance
-    * @param limitH
-    * @param yDistance
-    * @param limitV
-    * @param model
-    * @param tags
-    * @param data
-    * @return
+    * Output a single-line debug entry describing the current move, limits, and tags.
+    *
+    * @param player The player.
+    * @param hDistance Horizontal distance of this move.
+    * @param limitH Allowed horizontal distance for this move.
+    * @param yDistance Vertical distance of this move.
+    * @param limitV Allowed vertical distance for this move.
+    * @param model The active movement model.
+    * @param tags Tags accumulated during checking for diagnostics.
+    * @param data Player moving data (mutable state).
     */
     private void outpuDebugMove(final Player player, final double hDistance, final double limitH, 
                                 final double yDistance, final double limitV, final ModelFlying model, final List<String> tags, 
