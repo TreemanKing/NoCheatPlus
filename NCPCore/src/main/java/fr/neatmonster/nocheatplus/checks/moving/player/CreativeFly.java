@@ -51,7 +51,6 @@ import fr.neatmonster.nocheatplus.players.IPlayerData;
 import fr.neatmonster.nocheatplus.utilities.StringUtil;
 import fr.neatmonster.nocheatplus.utilities.location.PlayerLocation;
 import fr.neatmonster.nocheatplus.utilities.location.TrigUtil;
-import fr.neatmonster.nocheatplus.utilities.map.BlockProperties;
 import fr.neatmonster.nocheatplus.utilities.map.BlockFlags;
 
 
@@ -61,7 +60,7 @@ import fr.neatmonster.nocheatplus.utilities.map.BlockFlags;
  */
 public class CreativeFly extends Check {
 
-    private final List<String> tags = new LinkedList<String>();
+    private final List<String> tags = new LinkedList<>();
     private final BlockChangeTracker blockChangeTracker;
     private final IGenericInstanceHandle<IAttributeAccess> attributeAccess = NCPAPIProvider.getNoCheatPlusAPI().getGenericInstanceHandle(IAttributeAccess.class);
 
@@ -96,7 +95,6 @@ public class CreativeFly extends Check {
 
         // Reset tags, just in case.
         tags.clear();
-        // TODO: Other set back policy for elytra, e.g. not set in narrow spaces?
         final boolean debug = pData.isDebugActive(type);
         final GameMode gameMode = player.getGameMode();
         final PlayerMoveData thisMove = data.playerMoves.getCurrentMove();
@@ -173,7 +171,7 @@ public class CreativeFly extends Check {
         // Vertical move.
         //////////////////////////
 
-        double limitV = 0.0; // Limit. For debug only, violation handle on resultV
+        double limitV; // Limit. For debug only, violation handle on resultV
         double resultV = rese[0]; // Violation (normalized to 100 * 1 block, applies if > 0.0).
 
         // Distinguish checking method by y-direction of the move:
@@ -270,9 +268,7 @@ public class CreativeFly extends Check {
                 vd.setParameter(ParameterName.LOCATION_FROM, String.format(Locale.US, "%.2f, %.2f, %.2f", from.getX(), from.getY(), from.getZ()));
                 vd.setParameter(ParameterName.LOCATION_TO, String.format(Locale.US, "%.2f, %.2f, %.2f", to.getX(), to.getY(), to.getZ()));
                 vd.setParameter(ParameterName.DISTANCE, String.format(Locale.US, "%.2f", TrigUtil.distance(from,  to)));
-                if (model != null) {
-                    vd.setParameter(ParameterName.MODEL, model.getId().toString());
-                }
+                vd.setParameter(ParameterName.MODEL, model.getId());
                 if (!tags.isEmpty()) {
                     vd.setParameter(ParameterName.TAGS, StringUtil.join(tags, "+"));
                 }
@@ -302,10 +298,11 @@ public class CreativeFly extends Check {
 
         // Return setBack, if set.
         if (setBack != null) {
-            // Check for max height of the set back.
+            // Check for max height of the set-back.
             if (setBack.getY() > maximumHeight) {
                 // Correct the y position.
-                setBack.setY(getCorrectedHeight(maximumHeight, setBack.getWorld()));
+                final World sbWorld = setBack.getWorld();
+                setBack.setY(sbWorld != null ? getCorrectedHeight(maximumHeight, sbWorld) : maximumHeight - 10.0);
                 if (debug) {
                     debug(player, "Maximum height exceeded by set back, correct to: " + setBack.getY());
                 }
@@ -348,9 +345,9 @@ public class CreativeFly extends Check {
      * @param cc Movement configuration.
      * @return A 2-element array: [0] = limitH (allowed), [1] = resultH (excess over limit, not normalized).
      */
-    private double[] hDist(final Player player, final PlayerLocation from, final PlayerLocation to, final double hDistance, 
-                           final double yDistance, final boolean sprinting, final boolean flying, final PlayerMoveData thisMove, 
-                           final PlayerMoveData lastMove, final long time, final ModelFlying model, final MovingData data, final MovingConfig cc) {
+    private double[] hDist(final Player player, final PlayerLocation from, final PlayerLocation to, final double hDistance,
+                            final double yDistance, final boolean sprinting, final boolean flying, final PlayerMoveData thisMove,
+                            final PlayerMoveData lastMove, final long time, final ModelFlying model, final MovingData data, final MovingConfig cc) {
         // Modifiers.
         double fSpeed;
         final boolean ripglide = Bridge1_13.isRiptiding(player) && Bridge1_9.isGlidingWithElytra(player);
@@ -496,7 +493,6 @@ public class CreativeFly extends Check {
                                  final ModelFlying model, final MovingData data, final MovingConfig cc, final boolean debug) {
 
         final boolean ripglide = Bridge1_13.isRiptiding(from.getPlayer()) && Bridge1_9.isGlidingWithElytra(from.getPlayer());
-        final long now = System.currentTimeMillis();
         // Set the vertical limit.
         double limitV = model.getVerticalAscendModSpeed() / 100.0 * ModelFlying.VERTICAL_ASCEND_SPEED; 
         double resultV = 0.0;
@@ -525,12 +521,12 @@ public class CreativeFly extends Check {
         // Related to elytra.
         // TODO: Better detection of an elytra model (extra flags?).
         if (model.getVerticalAscendGliding()) {
-            limitV = Math.max(limitV, limitV = hackLytra(yDistance, limitV, thisMove, lastMove, from, data));
+            limitV = Math.max(limitV, hackLytra(yDistance, limitV, thisMove, lastMove, from, data));
         }
 
         // "Ripglide" (riptiding+gliding phase): allow some additional speed increase
         // Note that the ExtremeMove subcheck is skipped during such phases.
-        // TODO: Why not simply skip CreativeFly and let ExtremeMove deal with it? 
+        // TODO: Why not simply skip CreativeFly and let ExtremeMove deal with it?
         if (lastMove.toIsValid && ripglide && yDistance > limitV) {
             limitV += 5.9;
             tags.add("vripglide");
@@ -861,15 +857,17 @@ public class CreativeFly extends Check {
 
 
     /**
-     * Get vertical velocity stand behind this move 
-     * @param lasthDistance
-     * @param yDistance
-     * @param radPitch pitch in Radians (elytra)
-     * @param squaredCos squared of cos(radPitch) (elytra)
-     * @param levitation (levitation level)
-     * @param speed (elytra)
-     * @param up (elytra)
-     * @return baseV.
+     * Compute the base vertical velocity used to justify the current move under
+     * levitation or elytra mechanics. This is used to decide velocity exemptions.
+     *
+     * @param lasthDistance The previous move horizontal distance.
+     * @param yDistance The current move vertical distance.
+     * @param radPitch Player pitch in radians (elytra modeling).
+     * @param squaredCos Square of cos(radPitch) (elytra modeling helper).
+     * @param levitation Levitation amplifier (+1 already applied), or a negative value if not levitating.
+     * @param speed Elytra step speed constant (e.g., 0.01 with slow falling, 0.08 otherwise).
+     * @param up True if the player is looking straight up (-90 pitch compatibility path).
+     * @return The computed base vertical velocity to check against queued velocity.
      */
     private double getBaseV(double lasthDistance, double yDistance, float radPitch, double squaredCos, double levitation, double speed, boolean up) { 
 
@@ -1006,7 +1004,7 @@ public class CreativeFly extends Check {
      * @param cc Movement configuration.
      * @return A 2-element array: [0] = limitV (allowed), [1] = resultV (excess over limit).
      */
-    private double[] vDistDescend(final PlayerLocation from, final PlayerLocation to, final double yDistance, final boolean flying, 
+    private double[] vDistDescend(final PlayerLocation from, final PlayerLocation to, final double yDistance, final boolean flying,
                                   final PlayerMoveData thisMove, final PlayerMoveData lastMove, final ModelFlying model, 
                                   final MovingData data, final MovingConfig cc) {
         double limitV = 0.0;
@@ -1048,9 +1046,9 @@ public class CreativeFly extends Check {
      * @param cc Movement configuration.
      * @return A 2-element array: [0] = limitV (allowed), [1] = resultV (excess over limit).
      */
-    private double[] vDistZero(final PlayerLocation from, final PlayerLocation to, final double yDistance, final boolean flying, 
-                               final PlayerMoveData thisMove, final PlayerMoveData lastMove, final ModelFlying model, 
-                               final MovingData data, final MovingConfig cc) {
+    private double[] vDistZero(final PlayerLocation from, final PlayerLocation to, final double yDistance, final boolean flying,
+                                final PlayerMoveData thisMove, final PlayerMoveData lastMove, final ModelFlying model,
+                                final MovingData data, final MovingConfig cc) {
 
         double limitV = 0.0;
         double resultV = 0.0;
@@ -1102,7 +1100,7 @@ public class CreativeFly extends Check {
             if (model.getScaleLevitationEffect()) {
                 final double amount = lastMove.hAllowedDistance > 0.0 ? lastMove.hAllowedDistance : lastMove.hDistance;
                 if (thisMove.touchedGround) data.addHorizontalVelocity(new AccountEntry(amount, 2, MovingData.getHorVelValCount(amount)));
-                if (debug) debug(player, lastMove.modelFlying.getId().toString() + " -> potion.levitation: add velocity");
+                if (debug) debug(player, lastMove.modelFlying.getId() + " -> potion.levitation: add velocity");
                 return;
             }
 
@@ -1139,18 +1137,21 @@ public class CreativeFly extends Check {
         // Quick change between models, reset friction, invalid
         if (secondPastMove.modelFlying != null && lastMove.modelFlying != null
             && secondPastMove.modelFlying == model && model != lastMove.modelFlying) {
-            if (debug) debug(player, "Invalidate this move on too fast model switch: " + (secondPastMove.modelFlying.getId().toString() + " -> " + lastMove.modelFlying.getId().toString() + " -> " + model.getId().toString()));
+            if (debug) debug(player, "Invalidate this move on too fast model switch: " + (secondPastMove.modelFlying.getId() + " -> " + lastMove.modelFlying.getId() + " -> " + model.getId()));
             thisMove.invalidate();
         }
     }
 
 
    /**
-    * @param player
-    * @param thisMove
-    * @param lastMove
-    * @param data
-    * @return
+    * Guess a reasonable horizontal velocity amount to exempt after switching from Elytra or related transitions.
+    * The amount is based primarily on the previous horizontal distance, with special handling for ongoing glides.
+    *
+    * @param player The player.
+    * @param thisMove Current move data snapshot.
+    * @param lastMove Previous move data snapshot.
+    * @param data Player moving data (mutable state).
+    * @return The suggested horizontal velocity allowance for the transition phase.
     */
     private static double guessVelocityAmount(final Player player, final PlayerMoveData thisMove, final PlayerMoveData lastMove, final MovingData data) {
 
@@ -1172,7 +1173,7 @@ public class CreativeFly extends Check {
         }
         return defaultAmount;
     }
-    
+
     /**
      * Estimate allowed Elytra speeds for the next move based on current orientation and state.
      *
@@ -1272,25 +1273,26 @@ public class CreativeFly extends Check {
     * @return True if inside a narrow solid-surrounded space; otherwise false.
     */
     private boolean isInNarrowSpace(Player player) {
-        Location loc = player.getLocation();
-        World world = loc.getWorld();
-        double minX = loc.getX() - 0.3;
-        double maxX = loc.getX() + 0.3;
-        double minY = loc.getY();
-        double maxY = loc.getY() + 1.8; // Player height
-        double minZ = loc.getZ() - 0.3;
-        double maxZ = loc.getZ() + 0.3;
-        for (double x = minX; x <= maxX; x += 0.6) {
-            for (double y = minY; y <= maxY; y += 0.9) {
-                for (double z = minZ; z <= maxZ; z += 0.6) {
-                    Block block = world.getBlockAt((int)Math.floor(x), (int)Math.floor(y), (int)Math.floor(z));
-                    if (block.getType().isSolid()) {
-                        return true;
-                    }
-                }
-            }
-        }
-        return false;
+         Location loc = player.getLocation();
+         World world = loc.getWorld();
+         if (world == null) return false;
+         double minX = loc.getX() - 0.3;
+         double maxX = loc.getX() + 0.3;
+         double minY = loc.getY();
+         double maxY = loc.getY() + 1.8; // Player height
+         double minZ = loc.getZ() - 0.3;
+         double maxZ = loc.getZ() + 0.3;
+         for (double x = minX; x <= maxX; x += 0.6) {
+             for (double y = minY; y <= maxY; y += 0.9) {
+                 for (double z = minZ; z <= maxZ; z += 0.6) {
+                     Block block = world.getBlockAt((int)Math.floor(x), (int)Math.floor(y), (int)Math.floor(z));
+                     if (block.getType().isSolid()) {
+                         return true;
+                     }
+                 }
+             }
+         }
+         return false;
     }
 
 
@@ -1314,26 +1316,27 @@ public class CreativeFly extends Check {
         StringBuilder builder = new StringBuilder(350);
         final String dHDist = lastMove.toIsValid ? " (" + StringUtil.formatDiff(hDistance, lastMove.hDistance) + ")" : "";
         final String dYDist = lastMove.toIsValid ? " (" + StringUtil.formatDiff(yDistance, lastMove.yDistance)+ ")" : "";
-        builder.append("hDist: " + hDistance + dHDist + " / " + limitH + " , vDist: " + yDistance + dYDist + " / " + limitV);
+        builder.append("hDist: ").append(hDistance).append(dHDist).append(" / ").append(limitH)
+               .append(" , vDist: ").append(yDistance).append(dYDist).append(" / ").append(limitV);
         final PlayerMoveData thisMove = data.playerMoves.getCurrentMove();
         if (lastMove.toIsValid) {
-            builder.append(" , fdsq: " + StringUtil.fdec3.format(thisMove.distanceSquared / lastMove.distanceSquared));
+            builder.append(" , fdsq: ").append(StringUtil.fdec3.format(thisMove.distanceSquared / lastMove.distanceSquared));
         }
         if (thisMove.verVelUsed != null) {
-            builder.append(" , vVelUsed: " + thisMove.verVelUsed);
+            builder.append(" , vVelUsed: ").append(thisMove.verVelUsed);
         }
         if (data.fireworksBoostDuration > 0 && MovingConfig.ID_JETPACK_ELYTRA.equals(model.getId())) {
-            builder.append(" , boost: " + data.fireworksBoostDuration);
+            builder.append(" , boost: ").append(data.fireworksBoostDuration);
         }
         if (thisMove.elytrafly) {
             builder.append(", elytraFly");
         }
-        builder.append(" , model: " + model.getId());
+        builder.append(" , model: ").append(model.getId());
         if (!tags.isEmpty()) {
             builder.append(" , tags: ");
             builder.append(StringUtil.join(tags, "+"));
         }
-        builder.append(" , jumpphase: " + data.sfJumpPhase);
+        builder.append(" , jumpphase: ").append(data.sfJumpPhase);
         thisMove.addExtraProperties(builder, " , ");
         debug(player, builder.toString());
     }
