@@ -50,6 +50,19 @@ public class BlocksMC1_21 implements BlockPropertiesSetup {
             BlockInit.setInstantPassable("PALE_OAK_BUTTON");
         }
 
+        if (ServerVersion.compareMinecraftVersion("1.21.6") >= 0) {
+            BlockInit.setInstantPassable("CACTUS_FLOWER");
+            BlockInit.setInstantPassable("SHORT_DRY_GRASS");
+            BlockInit.setInstantPassable("LEAF_LITTER");
+            BlockInit.setInstantPassable("TALL_DRY_GRASS");
+            BlockInit.setInstantPassable("WILDFLOWERS");
+
+            BlockInit.setAs("DRIED_GHAST", Material.OAK_LEAVES);
+
+            BlockInit.setAs("TEST_BLOCK", Material.GRASS_BLOCK);
+            BlockInit.setAs("TEST_INSTANCE_BLOCK", Material.GRASS_BLOCK);
+        }
+
         ConfigFile config = ConfigManager.getConfigFile();
         if (config.getBoolean(ConfPaths.BLOCKBREAK_DEBUG, config.getBoolean(ConfPaths.CHECKS_DEBUG, false))) {
             StaticLog.logInfo("Added block-info for Minecraft 1.21 blocks");
